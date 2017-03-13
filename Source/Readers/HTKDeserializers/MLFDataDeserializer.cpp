@@ -86,10 +86,13 @@ public:
         if (descriptor.m_sequences.empty() || !descriptor.m_byteSize)
             LogicError("Empty chunks are not supported.");
 
-        m_buffer.resize(descriptor.m_byteSize + 1);
+        size_t sizeInBytes = descriptor.m_sequences.back().m_fileOffsetBytes + descriptor.m_sequences.back().m_byteSize -
+            descriptor.m_sequences.front().m_fileOffsetBytes;
+
+        m_buffer.resize(sizeInBytes + 1);
 
         // Make sure we always have 0 at the end for buffer overrun.
-        m_buffer[descriptor.m_byteSize] = 0;
+        m_buffer[sizeInBytes] = 0;
 
         auto chunkOffset = descriptor.m_sequences.front().m_fileOffsetBytes;
 
@@ -98,7 +101,7 @@ public:
         if (rc)
             RuntimeError("Error seeking to position '%" PRId64 "' in the input file '%ls', error code '%d'", chunkOffset, fileName.c_str(), rc);
 
-        freadOrDie(m_buffer.data(), descriptor.m_byteSize, 1, f.get());
+        freadOrDie(m_buffer.data(), sizeInBytes, 1, f.get());
     }
 };
 
@@ -261,7 +264,8 @@ public:
                 // TODO: Possibly set m_valid to false, but currently preserving the old behavior.
                 RuntimeError("Class id %d exceeds the model output dimension %d.", (int)range.ClassId(), (int)m_parent.m_dimension);
 
-            memset(m_classIds.data() + total, utterance[i].NumFrames(), range.ClassId());
+            for (size_t j = 0; j < utterance[i].NumFrames(); j++)
+                m_classIds[total + j] = range.ClassId();
             total += utterance[i].NumFrames();
         }
     }

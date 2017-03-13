@@ -1,4 +1,4 @@
-//
+f//
 // Copyright (c) Microsoft. All rights reserved.
 // Licensed under the MIT license. See LICENSE.md file in the project root for full license information.
 //
@@ -153,6 +153,9 @@ namespace Microsoft { namespace MSR { namespace CNTK {
 
                         if (isValid)
                             m_index.AddSequence(sd);
+                        else
+                            fprintf(stderr, "WARNING: Cannot parse the utterance %s at offset (%" PRIu64 ")", corpus->IdToKey(sd.m_key.m_sequence).c_str(), sd.m_fileOffsetBytes);
+
                     }
                 }
                 break;
