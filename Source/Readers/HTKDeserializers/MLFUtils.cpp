@@ -5,7 +5,7 @@
 #include "stdafx.h"
 #define __STDC_FORMAT_MACROS
 #define _CRT_SECURE_NO_WARNINGS
-
+#define _SCL_SECURE_NO_WARNINGS
 #include <inttypes.h>
 #include "MLFUtils.h"
 
@@ -58,13 +58,19 @@ namespace Microsoft { namespace MSR { namespace CNTK {
         lines.reserve(len / 20);
         auto range = boost::make_iterator_range(buffer.data(), buffer.data() + buffer.size());
         boost::split(lines, range, boost::is_any_of("\r\n"));
+
+        auto end = std::remove_if(lines.begin(), lines.end(), [](const boost::iterator_range<char*>& r) { return r.begin() == r.end(); });
+        lines.erase(end, lines.end());
+        return lines;
     }
 
     //////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    void MLFFrameRange::Build(const vector<boost::iterator_range<char*>>& tokens, double htkTimeToFrame, const unordered_map<string, size_t>& stateTable)
+    const double MLFFrameRange::htkTimeToFrame = 100000.0;
+
+    void MLFFrameRange::Build(const vector<boost::iterator_range<char*>>& tokens, const unordered_map<string, size_t>& stateTable)
     {
-        auto range = ParseFrameRange(tokens, htkTimeToFrame);
+        auto range = ParseFrameRange(tokens);
         size_t uid;
         if (!stateTable.empty()) // state table is given, check the state against the table.
         {
@@ -103,7 +109,7 @@ namespace Microsoft { namespace MSR { namespace CNTK {
             RuntimeError("MLFFrameRange Error: not enough bits for one of the values.");
     }
 
-    pair<size_t, size_t> MLFFrameRange::ParseFrameRange(const vector<boost::iterator_range<char*>>& tokens, double htkTimeToFrame)
+    pair<size_t, size_t> MLFFrameRange::ParseFrameRange(const vector<boost::iterator_range<char*>>& tokens)
     {
         if (tokens.size() < 2)
             RuntimeError("MLFFrameRange: currently MLF does not support format with less than two columns.");
@@ -131,13 +137,17 @@ namespace Microsoft { namespace MSR { namespace CNTK {
 
     ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-    bool MLFUtteranceParser::Parse(const SequenceDescriptor& sequence, const boost::iterator_range<char*>& sequenceData, vector<MLFFrameRange>& utterance, double htkTimeToFrame)
+    bool MLFUtteranceParser::Parse(const SequenceDescriptor& sequence, const boost::iterator_range<char*>& sequenceData, vector<MLFFrameRange>& utterance)
     {
         // Split to lines.
         vector<boost::iterator_range<char*>> lines;
         lines.reserve(512);
 
         boost::split(lines, sequenceData, boost::is_any_of("\r\n"));
+
+        auto end = std::remove_if(lines.begin(), lines.end(),
+            [](const boost::iterator_range<char*>& a) { return std::distance(a.begin(), a.end()) == 0; });
+        lines.erase(end, lines.end());
 
         // Start actual parsing of actual entry
         size_t idx = 0;
@@ -170,16 +180,15 @@ namespace Microsoft { namespace MSR { namespace CNTK {
             return false;
         }
 
-
         utterance.resize(e - s);
         vector<boost::iterator_range<char*>> tokens;
         for (size_t i = s; i < e; i++)
         {
             tokens.clear();
-            boost::split(tokens, lines[i], boost::is_any_of("\t"));
+            boost::split(tokens, lines[i], boost::is_any_of(" "));
 
             auto& current = utterance[i - s];
-            current.Build(tokens, htkTimeToFrame, m_states ? m_states->States() : unordered_map<string, size_t>{});
+            current.Build(tokens, m_states ? m_states->States() : unordered_map<string, size_t>{});
 
             // Check that frames are sequential.
             if (i > s)

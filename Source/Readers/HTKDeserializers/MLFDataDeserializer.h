@@ -10,6 +10,7 @@
 #include "../HTKMLFReader/biggrowablevectors.h"
 #include "CorpusDescriptor.h"
 #include "MLFUtils.h"
+#include "MLFIndexer.h"
 
 namespace Microsoft { namespace MSR { namespace CNTK {
 
@@ -52,12 +53,9 @@ private:
     void InitializeChunkDescriptions(CorpusDescriptorPtr corpus, const ConfigHelper& config, const std::wstring& stateListPath, size_t dimension);
     void InitializeStream(const std::wstring& name, size_t dimension);
 
-    void GetSequenceById(size_t sequenceId, std::vector<SequenceDataPtr>& result);
-
     // Vector that maps KeyType.m_sequence into an utterance ID (or SIZE_MAX if the key is not assigned).
     // This assumes that IDs introduced by the corpus are dense (which they right now, depending on the number of invalid / filtered sequences).
-    // TODO compare perf to map we had before.
-    std::vector<std::pair<size_t, const SequenceDescriptor*>> m_keyToSequence;
+    std::vector<std::pair<const ChunkDescriptor*, const SequenceDescriptor*>> m_keyToSequence;
 
     // Number of sequences
     size_t m_numberOfSequences = 0;
@@ -90,6 +88,9 @@ private:
 
     CorpusDescriptorPtr m_corpus;
 
+    std::vector<const ChunkDescriptor*> m_chunks;
+    std::map<const ChunkDescriptor*, size_t> m_chunkToFileIndex;
+
     size_t m_dimension;
 
     // Track phone boundaries
@@ -98,6 +99,7 @@ private:
     StateTablePtr m_stateTable;
 
     std::vector<std::pair<std::wstring, MLFIndexerPtr>> m_indexers;
+    std::vector<std::pair<std::shared_ptr<FILE>, std::wstring>> m_mlfFiles;
 };
 
 

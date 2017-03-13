@@ -46,28 +46,29 @@ namespace Microsoft { namespace MSR { namespace CNTK {
     // Representation an MLF range.
     class MLFFrameRange
     {
+        static const double htkTimeToFrame;
+
         ClassIdType m_classId;     // numeric state id
         uint32_t m_firstFrame;     // start frame
         uint32_t m_numFrames;      // number of frames
 
     public:
         // Parses format with original HTK state align MLF format and state list and builds an MLFFrameRange.
-        void Build(const vector<boost::iterator_range<char*>>& tokens, double htkTimeToFrame, const unordered_map<std::string, size_t>& stateTable);
+        void Build(const vector<boost::iterator_range<char*>>& tokens, const unordered_map<std::string, size_t>& stateTable);
 
         ClassIdType ClassId() const { return m_classId;    }
         uint32_t FirstFrame() const { return m_firstFrame; }
         uint32_t NumFrames()  const { return m_numFrames;  }
-
-
-    private:
-        void VerifyAndSaveRange(const std::pair<size_t, size_t>& frameRange, size_t uid);
 
         // Note: preserving logic of the old speech reader.
         // Parse the time range.
         // There are two formats:
         //  - original HTK
         //  - Dong's hacked format: ts te senonename senoneid
-        static std::pair<size_t, size_t> ParseFrameRange(const std::vector<boost::iterator_range<char*>>& tokens, double htkTimeToFrame);
+        static std::pair<size_t, size_t> ParseFrameRange(const std::vector<boost::iterator_range<char*>>& tokens);
+
+    private:
+        void VerifyAndSaveRange(const std::pair<size_t, size_t>& frameRange, size_t uid);
     };
 
     // Utility class for parsing an mlf utterance.
@@ -79,7 +80,7 @@ namespace Microsoft { namespace MSR { namespace CNTK {
         MLFUtteranceParser(const StateTablePtr& states) : m_states(states)
         {}
 
-        bool Parse(const SequenceDescriptor& utterance, const boost::iterator_range<char*>& utteranceData, std::vector<MLFFrameRange>& result, double htkTimeToFrame);
+        bool Parse(const SequenceDescriptor& utterance, const boost::iterator_range<char*>& utteranceData, std::vector<MLFFrameRange>& result);
     };
 
 }}} // namespace

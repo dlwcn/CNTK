@@ -15,7 +15,7 @@ namespace Microsoft { namespace MSR { namespace CNTK {
     class MLFIndexer : boost::noncopyable
     {
     public:
-        MLFIndexer(FILE* file, bool isPrimary, size_t chunkSize = 32 * 1024 * 1024, size_t bufferSize = 2 * 1024 * 1024);
+        MLFIndexer(FILE* file, size_t chunkSize = 1 * 1024 * 1024, size_t bufferSize = 4024);
 
         void Build(CorpusDescriptorPtr corpus);
 
@@ -28,32 +28,21 @@ namespace Microsoft { namespace MSR { namespace CNTK {
         int64_t m_fileOffsetStart;
         int64_t m_fileOffsetEnd;
 
-        std::unique_ptr<char[]> m_buffer;
-        const size_t m_bufferSize;
-        const char* m_bufferStart;
-        const char* m_bufferEnd;
-        const char* m_pos; // buffer index
-
+        std::vector<char> m_buffer;
+        size_t m_bufferSize;
         bool m_done; // true, when all input was processed
+
         Index m_index;
 
         // fills up the buffer with data from file, all previously buffered data
         // will be overwritten.
         void RefillBuffer();
 
-        // Moves the buffer position to the beginning of the next line.
-        // Returns true if the line contains a single dot.
-        bool SkipLine();
+        void ReadLines(vector<char>& buffer, vector<boost::iterator_range<char*>>& lines);
+        bool TryParseSequenceId(const boost::iterator_range<char*>& line, size_t& id, std::function<size_t(const std::string&)> keyToId);
 
-        // Returns current offset in the input file (in bytes).
-        int64_t GetFileOffset() const { return m_fileOffsetStart + (m_pos - m_bufferStart); }
-
-
-        bool TryGetSequenceId(size_t& id, std::function<size_t(const std::string&)> keyToId);
-
-        std::string m_lastElementsInPreviousBuffer;
-
-        void GetMLF();
+        std::string m_lastLineInBuffer;
+        std::string m_lastNonEmptyLine;
     };
 
     typedef std::shared_ptr<MLFIndexer> MLFIndexerPtr;

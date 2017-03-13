@@ -5,8 +5,10 @@
 #include "stdafx.h"
 #define __STDC_FORMAT_MACROS
 #define _CRT_SECURE_NO_WARNINGS
+#define _SCL_SECURE_NO_WARNINGS
 #include <inttypes.h>
 #include "MLFIndexer.h"
+#include "MLFUtils.h"
 
 using std::string;
 
@@ -14,17 +16,14 @@ const static char ROW_DELIMITER = '\n';
 
 namespace Microsoft { namespace MSR { namespace CNTK {
 
-    MLFIndexer::MLFIndexer(FILE* file, bool primary, size_t chunkSize, size_t bufferSize) :
+    MLFIndexer::MLFIndexer(FILE* file, size_t chunkSize, size_t bufferSize) :
         m_bufferSize(bufferSize),
         m_file(file),
         m_fileOffsetStart(0),
         m_fileOffsetEnd(0),
-        m_buffer(new char[bufferSize + 1]),
-        m_bufferStart(nullptr),
-        m_bufferEnd(nullptr),
-        m_pos(nullptr),
+        m_buffer(bufferSize),
         m_done(false),
-        m_index(chunkSize, primary)
+        m_index(chunkSize, true)
     {
         if (!m_file)
             RuntimeError("Input file not open for reading");
@@ -34,25 +33,49 @@ namespace Microsoft { namespace MSR { namespace CNTK {
     {
         if (!m_done)
         {
-            if (m_bufferEnd - m_bufferStart > 3)
-                m_lastElementsInPreviousBuffer.assign(m_bufferEnd - 3, m_bufferEnd); // remember last three elements.
-            else
-                m_lastElementsInPreviousBuffer.append(m_bufferStart, m_bufferEnd); // otherwise add 1 or 2 elements.
+            // Make sure we always have m_bufferSize elements in side the buffer.
+            m_buffer.resize(m_bufferSize);
 
-            size_t bytesRead = fread(m_buffer.get(), 1, m_bufferSize, m_file);
+            memcpy(&m_buffer[0], m_lastLineInBuffer.data(), m_lastLineInBuffer.size());
+            size_t bytesRead = fread(&m_buffer[0] + m_lastLineInBuffer.size(), 1, m_buffer.size() - m_lastLineInBuffer.size(), m_file);
+
             if (bytesRead == (size_t)-1)
                 RuntimeError("Could not read from the input file.");
 
             if (bytesRead == 0)
-                m_done = true;
-            else
             {
+                m_buffer.clear();
+                m_lastLineInBuffer.clear();
                 m_fileOffsetStart = m_fileOffsetEnd;
-                m_fileOffsetEnd += bytesRead;
-                m_bufferStart = m_buffer.get();
-                m_pos = m_bufferStart;
-                m_bufferEnd = m_bufferStart + bytesRead;
+                m_done = true;
+                return;
             }
+
+            int lastLF = 0;
+            {
+                // Let's find the latest \n if exists.
+                for (lastLF = (int)m_lastLineInBuffer.size() + (int)bytesRead - 1; lastLF > 0; lastLF--)
+                {
+                    if (m_buffer[lastLF] == '\n')
+                        break;
+                }
+
+                if (lastLF == 0)
+                    RuntimeError("Length of MLF sequence cannot exceed %d bytes.", (int)m_bufferSize);
+            }
+
+            auto logicalBufferEnd = lastLF + 1;
+
+            m_fileOffsetStart = m_fileOffsetEnd;
+            m_fileOffsetEnd = m_fileOffsetStart + logicalBufferEnd;
+
+            auto lastParialLineSize = m_buffer.size() - logicalBufferEnd;
+
+            // Remember the last possibly parital line.
+            m_lastLineInBuffer.resize(lastParialLineSize);
+            memcpy(&m_lastLineInBuffer[0], m_buffer.data() + logicalBufferEnd, lastParialLineSize);
+
+            m_buffer.resize(logicalBufferEnd);
         }
     }
 
@@ -67,135 +90,117 @@ namespace Microsoft { namespace MSR { namespace CNTK {
         if (m_done)
             RuntimeError("Input file is empty");
 
-        if ((m_bufferEnd - m_bufferStart > 3) &&
-            (m_bufferStart[0] == '\xEF' && m_bufferStart[1] == '\xBB' && m_bufferStart[2] == '\xBF'))
-        {
-            // input file contains UTF-8 BOM value, skip it.
-            m_pos += 3;
-            m_fileOffsetStart += 3;
-            m_bufferStart += 3;
-        }
-
-        GetMLF();
-
         size_t id = 0;
-        int64_t offset = GetFileOffset();
-
-        // read the very first sequence id
-        if (!TryGetSequenceId(id, corpus->KeyToId))
-            RuntimeError("Expected a sequence id at the offset %" PRIi64 ", none was found.", offset);
-
         SequenceDescriptor sd = {};
-        sd.m_fileOffsetBytes = offset;
-
-        bool previousDot = false;
-        size_t previousId = id;
+        int currentState = 0;
+        vector<boost::iterator_range<char*>> lines;
+        vector<boost::iterator_range<char*>> tokens;
+        bool isValid = true;
+        size_t lastNonEmptyString = 0;
         while (!m_done)
         {
-            previousDot = SkipLine(); // ignore whatever is left on this line.
-            offset = GetFileOffset(); // a new line starts at this offset;
-            sd.m_numberOfSamples++;
+            lines.clear();
+            ReadLines(m_buffer, lines);
 
-            if (!m_done && previousDot && TryGetSequenceId(id, corpus->KeyToId))
+            lastNonEmptyString = SIZE_MAX;
+            for (size_t i = 0; i < lines.size(); i++)
             {
-                // found a new sequence, which starts at the [offset] bytes into the file
-                sd.m_byteSize = offset - sd.m_fileOffsetBytes;
-                sd.m_key.m_sequence = previousId;
-                m_index.AddSequence(sd);
+                if (lines[i].begin() == lines[i].end()) // Skip all empty lines.
+                    continue;
 
-                sd = {};
-                sd.m_fileOffsetBytes = offset;
-                previousId = id;
-            }
-        }
-
-        // calculate the byte size for the last sequence
-        sd.m_byteSize = m_fileOffsetEnd - sd.m_fileOffsetBytes;
-        sd.m_key.m_sequence = previousId;
-        m_index.AddSequence(sd);
-    }
-
-    bool MLFIndexer::SkipLine()
-    {
-        // Need to check if the current line is a \n.[\r]\n
-        bool dot = false;
-        while (!m_done)
-        {
-            m_pos = (char*)memchr(m_pos, ROW_DELIMITER, m_bufferEnd - m_pos);
-
-            if (m_pos)
-            {
-                if (m_pos - m_bufferStart >= 3)
+                switch (currentState)
                 {
-                    dot = ((*(m_pos - 1) == '.') && (*(m_pos - 2) == ROW_DELIMITER)) ||
-                        ((*(m_pos - 1) == '\r') && (*(m_pos - 2) == '.') && (*(m_pos - 3) == ROW_DELIMITER));
-                }
-                else
+                case 0:
                 {
-                    // Check whether the pattern is on the border of the buffer.
-                    auto line = m_lastElementsInPreviousBuffer;
-                    line.append(m_bufferStart, m_pos);
-                    auto pos = m_lastElementsInPreviousBuffer.end();
-                    if (line.size() >= 2)
-                        dot |= ((*(pos - 1) == '.') && (*(pos - 2) == ROW_DELIMITER));
-                    if (line.size() >= 2)
-                        dot |= ((*(pos - 1) == '\r') && (*(pos - 2) == '.') && (*(pos - 3) == ROW_DELIMITER));
+                    if (std::string(lines[i].begin(), lines[i].end()) != "#!MLF!#")
+                        RuntimeError("Expected MLF header was not found.");
+                    currentState = 1;
+                }
+                break;
+                case 1:
+                {
+                    sd = {};
+                    sd.m_fileOffsetBytes = m_fileOffsetStart + lines[i].begin() - m_buffer.data();
+                    isValid = TryParseSequenceId(lines[i], id, corpus->KeyToId);
+                    sd.m_key.m_sequence = id;
+                    currentState = 2;
+                }
+                break;
+
+                case 2:
+                {
+                    if (std::distance(lines[i].begin(), lines[i].end()) == 1 && *lines[i].begin() == '.')
+                    {
+                        sd.m_byteSize = m_fileOffsetStart + lines[i].end() - m_buffer.data() - sd.m_fileOffsetBytes;
+                        currentState = 1;
+
+                        // Let's find last non empty string and parse information about frames out of it.
+                        // Here we assume that the sequence is correct, if not - it will be invalidated later 
+                        // when the actual data is read.
+                        if (lastNonEmptyString != SIZE_MAX)
+                            m_lastNonEmptyLine = std::string(lines[lastNonEmptyString].begin(), lines[lastNonEmptyString].end());
+
+                        if (m_lastNonEmptyLine.empty())
+                            isValid = false;
+                        else
+                        {
+                            tokens.clear();
+                            auto container = boost::make_iterator_range(&m_lastNonEmptyLine[0], &m_lastNonEmptyLine[0] + m_lastNonEmptyLine.size());
+                            boost::split(tokens, container, boost::is_any_of(" "));
+                            auto range = MLFFrameRange::ParseFrameRange(tokens);
+                            sd.m_numberOfSamples = static_cast<uint32_t>(range.second);
+                        }
+
+                        if (isValid)
+                            m_index.AddSequence(sd);
+                    }
+                }
+                break;
+                default:
+                    LogicError("Unexpected MLF state.");
                 }
 
-                //found a new-line character
-                if (++m_pos == m_bufferEnd)
-                    RefillBuffer();
-
-                return dot;
+                lastNonEmptyString = i;
             }
+
+            // Remembering last non empty string to be able to retrieve time frame information 
+            // when dot is encoutered on the border of two buffers.
+            if (lastNonEmptyString != SIZE_MAX)
+                m_lastNonEmptyLine = std::string(lines[lastNonEmptyString].begin(), lines[lastNonEmptyString].end());
+            else
+                m_lastNonEmptyLine.clear();
 
             RefillBuffer();
         }
     }
 
-    void MLFIndexer::GetMLF()
+    void MLFIndexer::ReadLines(vector<char>& buffer, vector<boost::iterator_range<char*>>& lines)
     {
-        auto counter = 0;
-        std::string mlf;
-        while (!m_done && counter < 7)
-        {
-            mlf += *m_pos++;
-            m_fileOffsetStart++;
-            if (m_pos == m_bufferEnd)
-                RefillBuffer();
-        }
-
-        if (mlf != "#!MLF!#")
-            RuntimeError("Expected MLF header was not found.");
+        lines.clear();
+        auto range = boost::make_iterator_range(buffer.data(), buffer.data() + buffer.size());
+        boost::split(lines, range, boost::is_any_of("\r\n"));
     }
 
-    bool MLFIndexer::TryGetSequenceId(size_t& id, std::function<size_t(const std::string&)> keyToId)
+    bool MLFIndexer::TryParseSequenceId(const boost::iterator_range<char*>& line, size_t& id, std::function<size_t(const std::string&)> keyToId)
     {
-        bool found = false;
         id = 0;
-        std::string key;
-        key.reserve(256);
-        while (!m_done)
+
+        std::string key(line.begin(), line.end());
+        boost::trim_right(key);
+
+        if (key.size() > 2 && key.front() == '"' && key.back() == '"')
         {
-            char c = *m_pos;
-            if (!isdigit(c) && !isalpha(c))
-            {
-                if (found)
-                    id = keyToId(key);
-                return found;
-            }
+            key = key.substr(1, key.size() - 2);
+            if (key.size() > 2 && key[0] == '*' && key[1] == '/')
+                key = key.substr(2);
 
-            key += c;
-            found = true;
-            ++m_pos;
+            // Remove extension if specified.
+            key = key.substr(0, key.find_last_of("."));
 
-            if (m_pos == m_bufferEnd)
-                RefillBuffer();
+            id = keyToId(key);
+            return true;
         }
 
-        // reached EOF without hitting the pipe character,
-        // ignore it for not, parser will have to deal with it.
         return false;
     }
-
 }}}
