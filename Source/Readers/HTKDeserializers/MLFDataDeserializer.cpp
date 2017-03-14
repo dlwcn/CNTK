@@ -127,6 +127,8 @@ public:
 #pragma omp parallel for schedule(dynamic)
         for (int i = 0; i < descriptor.m_sequences.size(); ++i)
             CacheSequence(descriptor.m_sequences[i]);
+
+        m_buffer.swap(std::vector<char>());
     }
 
     void CacheSequence(const SequenceDescriptor& sequence)
@@ -207,6 +209,8 @@ public:
 #pragma omp parallel for schedule(dynamic)
         for (int i = 0; i < descriptor.m_sequences.size(); ++i)
             CacheSequence(descriptor.m_sequences[i]);
+
+        m_buffer.swap(std::vector<char>());
     }
 
     // Get utterance by the absolute frame index in chunk.
