@@ -16,6 +16,7 @@
 #include "StringUtil.h"
 #include "MLFIndexer.h"
 #include "MLFUtils.h"
+#include "ReaderConstants.h"
 
 #undef max // max is defined in minwindef.h
 
@@ -285,6 +286,10 @@ MLFDataDeserializer::MLFDataDeserializer(CorpusDescriptorPtr corpus, const Confi
     std::wstring precision = cfg(L"precision", L"float");;
     m_elementType = AreEqualIgnoreCase(precision, L"float") ? ElementType::tfloat : ElementType::tdouble;
 
+    // Same behavior as for the old deserializer - keep almost all in memory,
+    // because there are a lot of none aligned sets.
+    m_chunkSizeBytes = cfg(L"chunkSizeInBytes", g_64MB);
+
     ConfigParameters input = inputs.front();
     auto inputName = input.GetMemberIds().front();
 
@@ -321,6 +326,10 @@ MLFDataDeserializer::MLFDataDeserializer(CorpusDescriptorPtr corpus, const Confi
             "value (%" PRIu64 ")\n", m_dimension, (size_t)numeric_limits<IndexType>::max());
     }
 
+    // Same behavior as for the old deserializer - keep almost all in memory,
+    // because there are a lot of none aligned sets.
+    m_chunkSizeBytes = labelConfig(L"chunkSizeInBytes", g_64MB);
+
     std::wstring precision = labelConfig(L"precision", L"float");;
     m_elementType = AreEqualIgnoreCase(precision, L"float") ? ElementType::tfloat : ElementType::tdouble;
 
@@ -352,7 +361,7 @@ void MLFDataDeserializer::InitializeChunkDescriptions(CorpusDescriptorPtr corpus
         auto file = fopenOrDie(path, L"rbS");
         m_mlfFiles.push_back(std::make_pair(std::shared_ptr<FILE>(file, [](FILE *f) { if (f) fclose(f); }), path));
 
-        auto indexer = std::make_shared<MLFIndexer>(file, m_frameMode);
+        auto indexer = std::make_shared<MLFIndexer>(file, m_frameMode, m_chunkSizeBytes);
         indexer->Build(corpus);
         m_indexers.push_back(make_pair(path, indexer));
 

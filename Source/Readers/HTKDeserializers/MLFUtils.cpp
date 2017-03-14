@@ -182,13 +182,14 @@ namespace Microsoft { namespace MSR { namespace CNTK {
 
         utterance.resize(e - s);
         vector<boost::iterator_range<char*>> tokens;
+        unordered_map<string, size_t> empty;
         for (size_t i = s; i < e; i++)
         {
             tokens.clear();
             boost::split(tokens, lines[i], boost::is_any_of(" "));
 
             auto& current = utterance[i - s];
-            current.Build(tokens, m_states ? m_states->States() : unordered_map<string, size_t>{});
+            current.Build(tokens, m_states ? m_states->States() : empty);
 
             // Check that frames are sequential.
             if (i > s)

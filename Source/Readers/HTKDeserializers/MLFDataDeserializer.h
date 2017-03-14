@@ -72,6 +72,7 @@ private:
     std::map<const ChunkDescriptor*, size_t> m_chunkToFileIndex;
 
     size_t m_dimension;
+    size_t m_chunkSizeBytes;
 
     // Track phone boundaries
     bool m_withPhoneBoundaries;
