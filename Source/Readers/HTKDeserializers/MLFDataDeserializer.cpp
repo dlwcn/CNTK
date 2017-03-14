@@ -160,17 +160,12 @@ public:
             s = make_shared<MLFSequenceData<double>>(numSamples, m_parent.m_withPhoneBoundaries ? sequencePhoneBoundaries : vector<size_t>{});
         }
 
+        auto startRange = s->m_indices;
+        for (const auto& f : utterance)
         {
-            size_t frameIndex = 0;
-            for (const auto& f : utterance)
-            {
-                for (size_t j = 0; j < f.NumFrames(); ++j)
-                {
-                    s->m_indices[frameIndex++] = static_cast<IndexType>(f.ClassId());
-                }
-            }
+            std::fill(startRange, startRange + f.NumFrames(), static_cast<IndexType>(f.ClassId()));
+            startRange += f.NumFrames();
         }
-
         result.push_back(s);
     }
 };
@@ -242,7 +237,7 @@ public:
 
         m_valid[sequence.m_indexInChunk] = true;
 
-        size_t offset = m_descriptor.m_firstSamples[sequence.m_indexInChunk];
+        auto startRange = m_classIds.begin() + m_descriptor.m_firstSamples[sequence.m_indexInChunk];
         for(size_t i = 0; i < utterance.size(); ++i)
         {
             const auto& range = utterance[i];
@@ -250,10 +245,8 @@ public:
                 // TODO: Possibly set m_valid to false, but currently preserving the old behavior.
                 RuntimeError("Class id %d exceeds the model output dimension %d.", (int)range.ClassId(), (int)m_parent.m_dimension);
 
-            auto startRange = m_classIds.begin() + offset;
-            auto endRange = startRange + utterance[i].NumFrames();
-            std::fill(startRange, endRange, range.ClassId());
-            offset += utterance[i].NumFrames();
+            std::fill(startRange, startRange + utterance[i].NumFrames(), range.ClassId());
+            startRange += utterance[i].NumFrames();
         }
     }
 };
