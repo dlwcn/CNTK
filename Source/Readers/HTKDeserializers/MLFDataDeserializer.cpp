@@ -180,10 +180,6 @@ class MLFDataDeserializer::FrameChunk : public MLFDataDeserializer::ChunkBase
 {
     // Actual values of frames.
     std::vector<ClassIdType> m_classIds;
-
-    // Index of the first frame of each and evey utterance.
-    std::vector<size_t> m_firstFrames;
-
     std::vector<bool> m_valid;
 
 public:
@@ -193,23 +189,12 @@ public:
         // Let's also preallocate an big array for filling in class ids for whole chunk,
         // it is used for optimizing speed of retrieval in frame mode.
         m_classIds.resize(m_descriptor.m_numberOfSamples);
-
-        // Also pre-fill information where frames of a particular sequence start.
-        {
-            m_firstFrames.resize(m_descriptor.m_numberOfSequences);
-            m_valid.resize(m_descriptor.m_numberOfSequences);
-            size_t totalNumOfFrames = 0;
-            for (size_t i = 0; i < m_descriptor.m_sequences.size(); ++i)
-            {
-                m_firstFrames[i] = totalNumOfFrames;
-                totalNumOfFrames += m_descriptor.m_sequences[i].m_numberOfSamples;
-            }
-        }
+        m_valid.resize(m_descriptor.m_numberOfSequences);
 
         // Parse the data on different threads to avoid locking during GetSequence calls.
-//#pragma omp parallel for schedule(dynamic)
-        for (const auto& s : descriptor.m_sequences)
-            CacheSequence(s);
+#pragma omp parallel for schedule(dynamic)
+        for (int i = 0; i < descriptor.m_sequences.size(); ++i)
+            CacheSequence(descriptor.m_sequences[i]);
     }
 
     // Get utterance by the absolute frame index in chunk.
@@ -217,11 +202,11 @@ public:
     size_t GetUtteranceForChunkFrameIndex(size_t frameIndex) const
     {
         auto result = std::upper_bound(
-            m_firstFrames.begin(),
-            m_firstFrames.end(),
+            m_descriptor.m_firstSamples.begin(),
+            m_descriptor.m_firstSamples.end(),
             frameIndex,
             [](size_t fi, const size_t& a) { return fi < a; });
-        return result - 1 - m_firstFrames.begin();
+        return result - 1 - m_descriptor.m_firstSamples.begin();
     }
 
     void GetSequence(size_t sequenceIndex, std::vector<SequenceDataPtr>& result) override
@@ -257,7 +242,7 @@ public:
 
         m_valid[sequence.m_indexInChunk] = true;
 
-        size_t offset = m_firstFrames[sequence.m_indexInChunk];
+        size_t offset = m_descriptor.m_firstSamples[sequence.m_indexInChunk];
         for(size_t i = 0; i < utterance.size(); ++i)
         {
             const auto& range = utterance[i];
