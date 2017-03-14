@@ -238,7 +238,7 @@ vector<string> ConfigHelper::GetSequencePaths()
     }
 
     if (scp.bad())
-        RuntimeError("An error occurred while reading input file: %ls", scriptPath.c_str());
+        RuntimeError("An error occurred while reading input file: %s", scriptPath.c_str());
 
     fprintf(stderr, " %d entries\n", static_cast<int>(filelist.size()));
 
@@ -301,6 +301,7 @@ vector<string> ConfigHelper::GetSequencePaths()
         }
     }
 
+    filelist.shrink_to_fit();
     return filelist;
 }
 
