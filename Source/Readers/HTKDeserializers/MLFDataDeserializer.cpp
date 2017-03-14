@@ -73,6 +73,7 @@ class MLFDataDeserializer::ChunkBase : public Chunk
 protected:
     std::vector<char> m_buffer;
     MLFUtteranceParser m_parser;
+    std::vector<bool> m_valid;
 
     const MLFDataDeserializer& m_parent;
     const ChunkDescriptor& m_descriptor;
@@ -106,21 +107,29 @@ public:
             RuntimeError("Error seeking to position '%" PRId64 "' in the input file '%ls', error code '%d'", chunkOffset, fileName.c_str(), rc);
 
         freadOrDie(m_buffer.data(), sizeInBytes, 1, f.get());
+
+        m_valid.resize(m_descriptor.m_numberOfSequences, true);
     }
 };
 
 // Sequence MLF chunk. The time of life always less than the time of life of the parent deserializer.
 class MLFDataDeserializer::SequenceChunk : public MLFDataDeserializer::ChunkBase
 {
+    std::vector<SparseSequenceDataPtr> m_sequences;
+
 public:
     SequenceChunk(const MLFDataDeserializer& parent, const ChunkDescriptor& descriptor, const std::wstring& fileName, std::shared_ptr<FILE>& f, StateTablePtr states)
         : ChunkBase(parent, descriptor, fileName, f, states)
     {
+        m_sequences.resize(m_descriptor.m_numberOfSequences);
+
+#pragma omp parallel for schedule(dynamic)
+        for (int i = 0; i < descriptor.m_sequences.size(); ++i)
+            CacheSequence(descriptor.m_sequences[i]);
     }
 
-    void GetSequence(size_t sequenceIndex, std::vector<SequenceDataPtr>& result) override
+    void CacheSequence(const SequenceDescriptor& sequence)
     {
-        const auto& sequence = m_descriptor.m_sequences[sequenceIndex];
         auto start = m_buffer.data() + (sequence.m_fileOffsetBytes - m_descriptor.m_sequences.front().m_fileOffsetBytes);
         auto end = start + sequence.m_byteSize;
 
@@ -129,15 +138,14 @@ public:
         if (!parsed) // cannot parse
         {
             fprintf(stderr, "WARNING: Cannot parse the utterance %s", m_parent.m_corpus->IdToKey(sequence.m_key.m_sequence).c_str());
-            SparseSequenceDataPtr s = make_shared<MLFSequenceData<float>>(0);
-            s->m_isValid = false;
-            result.push_back(s);
+            m_valid[sequence.m_indexInChunk] = false;
             return;
         }
 
+        m_valid[sequence.m_indexInChunk] = true;
+
         // Compute some statistics and perform checks.
         vector<size_t> sequencePhoneBoundaries(m_parent.m_withPhoneBoundaries ? utterance.size() : 0);
-        size_t numSamples = 0;
         for (size_t i = 0; i < utterance.size(); ++i)
         {
             if (m_parent.m_withPhoneBoundaries)
@@ -146,18 +154,16 @@ public:
             const auto& range = utterance[i];
             if (range.ClassId() >= m_parent.m_dimension)
                 RuntimeError("Class id %d exceeds the model output dimension %d.", (int)range.ClassId(), (int)m_parent.m_dimension);
-
-            numSamples += range.NumFrames();
         }
 
         // Packing labels for the utterance into sparse sequence.
         SparseSequenceDataPtr s;
         if (m_parent.m_elementType == ElementType::tfloat)
-            s = make_shared<MLFSequenceData<float>>(numSamples, m_parent.m_withPhoneBoundaries ? sequencePhoneBoundaries : vector<size_t>{});
+            s = make_shared<MLFSequenceData<float>>(sequence.m_numberOfSamples, m_parent.m_withPhoneBoundaries ? sequencePhoneBoundaries : vector<size_t>{});
         else
         {
             assert(m_parent.m_elementType == ElementType::tdouble);
-            s = make_shared<MLFSequenceData<double>>(numSamples, m_parent.m_withPhoneBoundaries ? sequencePhoneBoundaries : vector<size_t>{});
+            s = make_shared<MLFSequenceData<double>>(sequence.m_numberOfSamples, m_parent.m_withPhoneBoundaries ? sequencePhoneBoundaries : vector<size_t>{});
         }
 
         auto startRange = s->m_indices;
@@ -166,7 +172,21 @@ public:
             std::fill(startRange, startRange + f.NumFrames(), static_cast<IndexType>(f.ClassId()));
             startRange += f.NumFrames();
         }
-        result.push_back(s);
+
+        m_sequences[sequence.m_indexInChunk] = s;
+    }
+
+    void GetSequence(size_t sequenceIndex, std::vector<SequenceDataPtr>& result) override
+    {
+        if (!m_valid[sequenceIndex])
+        {
+            SparseSequenceDataPtr s = make_shared<MLFSequenceData<float>>(0);
+            s->m_isValid = false;
+            result.push_back(s);
+            return;
+        }
+
+        result.push_back(m_sequences[sequenceIndex]);
     }
 };
 
@@ -175,7 +195,6 @@ class MLFDataDeserializer::FrameChunk : public MLFDataDeserializer::ChunkBase
 {
     // Actual values of frames.
     std::vector<ClassIdType> m_classIds;
-    std::vector<bool> m_valid;
 
 public:
     FrameChunk(const MLFDataDeserializer& parent, const ChunkDescriptor& descriptor, const std::wstring& fileName, std::shared_ptr<FILE>& f, StateTablePtr states)
@@ -184,7 +203,6 @@ public:
         // Let's also preallocate an big array for filling in class ids for whole chunk,
         // it is used for optimizing speed of retrieval in frame mode.
         m_classIds.resize(m_descriptor.m_numberOfSamples);
-        m_valid.resize(m_descriptor.m_numberOfSequences);
 
         // Parse the data on different threads to avoid locking during GetSequence calls.
 #pragma omp parallel for schedule(dynamic)

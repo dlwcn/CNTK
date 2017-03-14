@@ -15,7 +15,7 @@ namespace Microsoft { namespace MSR { namespace CNTK {
     class MLFIndexer : boost::noncopyable
     {
     public:
-        MLFIndexer(FILE* file, bool frameMode, size_t chunkSize = 64 * 1024 * 1024, size_t bufferSize = 64 * 1024 * 1024);
+        MLFIndexer(FILE* file, bool frameMode, size_t chunkSize = 1024 * 1024, size_t bufferSize = 4096);
 
         void Build(CorpusDescriptorPtr corpus);
 
