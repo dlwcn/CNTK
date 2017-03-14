@@ -141,7 +141,7 @@ public:
         bool parsed = m_parser.Parse(sequence, boost::make_iterator_range(start, end), utterance);
         if (!parsed) // cannot parse
         {
-            fprintf(stderr, "WARNING: Cannot parse the utterance %s", m_parent.m_corpus->IdToKey(sequence.m_key.m_sequence).c_str());
+            fprintf(stderr, "WARNING: Cannot parse the utterance %s\n", m_parent.m_corpus->IdToKey(sequence.m_key.m_sequence).c_str());
             m_valid[sequence.m_indexInChunk] = false;
             return;
         }
@@ -255,7 +255,7 @@ public:
         if (!parsed)
         {
             m_valid[sequence.m_indexInChunk] = false;
-            fprintf(stderr, "WARNING: Cannot parse the utterance %s", m_parent.m_corpus->IdToKey(sequence.m_key.m_sequence).c_str());
+            fprintf(stderr, "WARNING: Cannot parse the utterance %s\n", m_parent.m_corpus->IdToKey(sequence.m_key.m_sequence).c_str());
             return;
         }
 
