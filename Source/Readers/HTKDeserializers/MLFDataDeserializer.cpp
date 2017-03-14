@@ -26,6 +26,10 @@ using namespace std;
 static float s_oneFloat = 1.0;
 static double s_oneDouble = 1.0;
 
+// A constant used in 1-hot vectors to identify the first frame of a phone.
+// Used primarily in CTC-type training.
+static float PHONE_BOUNDARY = 2.0f;
+
 // Sparse labels for an utterance.
 template <class ElemType>
 struct MLFSequenceData : SparseSequenceData
@@ -253,10 +257,7 @@ public:
 
         m_valid[sequence.m_indexInChunk] = true;
 
-        std::vector<ClassIdType> localBuffer;
-        localBuffer.resize(sequence.m_numberOfSamples);
-
-        size_t total = 0;
+        size_t offset = m_firstFrames[sequence.m_indexInChunk];
         for(size_t i = 0; i < utterance.size(); ++i)
         {
             const auto& range = utterance[i];
@@ -264,22 +265,16 @@ public:
                 // TODO: Possibly set m_valid to false, but currently preserving the old behavior.
                 RuntimeError("Class id %d exceeds the model output dimension %d.", (int)range.ClassId(), (int)m_parent.m_dimension);
 
-            for (size_t j = 0; j < utterance[i].NumFrames(); j++)
-                m_classIds[total + j] = range.ClassId();
-            total += utterance[i].NumFrames();
+            auto startRange = m_classIds.begin() + offset;
+            auto endRange = startRange + utterance[i].NumFrames();
+            std::fill(startRange, endRange, range.ClassId());
+            offset += utterance[i].NumFrames();
         }
     }
 };
 
-// Inner class for an utterance.
-struct MLFUtterance : SequenceDescription
-{
-    size_t m_sequenceStart;
-};
-
 MLFDataDeserializer::MLFDataDeserializer(CorpusDescriptorPtr corpus, const ConfigParameters& cfg, bool primary)
-    : DataDeserializerBase(primary),
-      m_totalNumberOfFrames(0)
+    : DataDeserializerBase(primary)
 {
     if (primary)
         RuntimeError("MLFDataDeserializer currently does not support primary mode.");
@@ -312,8 +307,7 @@ MLFDataDeserializer::MLFDataDeserializer(CorpusDescriptorPtr corpus, const Confi
 }
 
 MLFDataDeserializer::MLFDataDeserializer(CorpusDescriptorPtr corpus, const ConfigParameters& labelConfig, const wstring& name)
-    : DataDeserializerBase(false),
-      m_totalNumberOfFrames(0)
+    : DataDeserializerBase(false)
 {
     // The frame mode is currently specified once per configuration,
     // not in the configuration of a particular deserializer, but on a higher level in the configuration.
@@ -355,12 +349,14 @@ void MLFDataDeserializer::InitializeChunkDescriptions(CorpusDescriptorPtr corpus
     }
 
     auto emptyPair = std::pair<const ChunkDescriptor*, const SequenceDescriptor*>(nullptr, nullptr);
+    size_t totalNumSequences = 0;
+    size_t totalNumFrames = 0;
     for (const auto& path : mlfPaths)
     {
         auto file = fopenOrDie(path, L"rbS");
         m_mlfFiles.push_back(std::make_pair(std::shared_ptr<FILE>(file, [](FILE *f) { if (f) fclose(f); }), path));
 
-        auto indexer = std::make_shared<MLFIndexer>(file);
+        auto indexer = std::make_shared<MLFIndexer>(file, m_frameMode);
         indexer->Build(corpus);
         m_indexers.push_back(make_pair(path, indexer));
 
@@ -368,28 +364,30 @@ void MLFDataDeserializer::InitializeChunkDescriptions(CorpusDescriptorPtr corpus
         const auto& index = indexer->GetIndex();
         for (const auto& chunk : index.m_chunks)
         {
-            for (const auto& sequence : chunk.m_sequences)
+            // Preparing chunk info that will be exposed to the outside.
+            for (size_t i = 0; i < chunk.m_sequences.size(); ++i)
             {
+                const auto& sequence = chunk.m_sequences[i];
+
                 if (m_keyToSequence.size() <= sequence.m_key.m_sequence)
                     m_keyToSequence.resize(sequence.m_key.m_sequence + 1, emptyPair);
 
                 assert(m_keyToSequence[sequence.m_key.m_sequence] == emptyPair);
                 m_keyToSequence[sequence.m_key.m_sequence] = std::make_pair(&chunk, &sequence);
-                m_numberOfSequences++;
-                m_totalNumberOfFrames += sequence.m_numberOfSamples;
             }
 
-            // Also preparing chunk info that will be exposed to the outside.
-            m_chunks.push_back(&chunk);
+            totalNumSequences += chunk.m_numberOfSequences;
+            totalNumFrames += chunk.m_numberOfSamples;
             m_chunkToFileIndex.insert(make_pair(&chunk, m_mlfFiles.size() - 1));
+            m_chunks.push_back(&chunk);
         }
     }
 
     std::sort(m_chunks.begin(), m_chunks.end());
 
     fprintf(stderr, "MLFDataDeserializer::MLFDataDeserializer: %" PRIu64 " utterances with %" PRIu64 " frames\n",
-            m_numberOfSequences,
-            m_totalNumberOfFrames);
+        totalNumSequences,
+        totalNumFrames);
 
     if (m_frameMode)
     {
@@ -487,7 +485,7 @@ bool MLFDataDeserializer::GetSequenceDescriptionByKey(const KeyType& key, Sequen
 
     if (m_frameMode)
     {
-        result.m_indexInChunk = sequence->m_indexInChunk;
+        result.m_indexInChunk = chunkAndSequence.first->m_firstSamples[sequence->m_indexInChunk] + key.m_sample;
         result.m_numberOfSamples = 1;
     }
     else

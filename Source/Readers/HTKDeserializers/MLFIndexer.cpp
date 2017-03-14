@@ -16,14 +16,14 @@ const static char ROW_DELIMITER = '\n';
 
 namespace Microsoft { namespace MSR { namespace CNTK {
 
-    MLFIndexer::MLFIndexer(FILE* file, size_t chunkSize, size_t bufferSize) :
+    MLFIndexer::MLFIndexer(FILE* file, bool frameMode, size_t chunkSize, size_t bufferSize) :
         m_bufferSize(bufferSize),
         m_file(file),
         m_fileOffsetStart(0),
         m_fileOffsetEnd(0),
         m_buffer(bufferSize),
         m_done(false),
-        m_index(chunkSize, true)
+        m_index(chunkSize, true, frameMode)
     {
         if (!m_file)
             RuntimeError("Input file not open for reading");
@@ -54,13 +54,13 @@ namespace Microsoft { namespace MSR { namespace CNTK {
             int lastLF = 0;
             {
                 // Let's find the latest \n if exists.
-                for (lastLF = (int)m_lastLineInBuffer.size() + (int)bytesRead - 1; lastLF > 0; lastLF--)
+                for (lastLF = (int)m_lastLineInBuffer.size() + (int)bytesRead - 1; lastLF >= 0; lastLF--)
                 {
                     if (m_buffer[lastLF] == '\n')
                         break;
                 }
 
-                if (lastLF == 0)
+                if (lastLF < 0)
                     RuntimeError("Length of MLF sequence cannot exceed %d bytes.", (int)m_bufferSize);
             }
 
@@ -155,7 +155,6 @@ namespace Microsoft { namespace MSR { namespace CNTK {
                             m_index.AddSequence(sd);
                         else
                             fprintf(stderr, "WARNING: Cannot parse the utterance %s at offset (%" PRIu64 ")", corpus->IdToKey(sd.m_key.m_sequence).c_str(), sd.m_fileOffsetBytes);
-
                     }
                 }
                 break;

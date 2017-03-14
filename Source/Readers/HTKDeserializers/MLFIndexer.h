@@ -15,7 +15,7 @@ namespace Microsoft { namespace MSR { namespace CNTK {
     class MLFIndexer : boost::noncopyable
     {
     public:
-        MLFIndexer(FILE* file, size_t chunkSize = 1 * 1024 * 1024, size_t bufferSize = 4024);
+        MLFIndexer(FILE* file, bool frameMode, size_t chunkSize = 1 * 1024 * 1024, size_t bufferSize = 4024);
 
         void Build(CorpusDescriptorPtr corpus);
 
@@ -31,6 +31,7 @@ namespace Microsoft { namespace MSR { namespace CNTK {
         std::vector<char> m_buffer;
         size_t m_bufferSize;
         bool m_done; // true, when all input was processed
+        bool m_frameMode;
 
         Index m_index;
 

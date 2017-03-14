@@ -5,6 +5,7 @@
 
 #pragma once
 
+#include <boost/noncopyable.hpp>
 #include "DataDeserializer.h"
 #include "HTKDataDeserializer.h"
 #include "../HTKMLFReader/biggrowablevectors.h"
@@ -14,14 +15,9 @@
 
 namespace Microsoft { namespace MSR { namespace CNTK {
 
-
-// A constant used in 1-hot vectors to identify the first frame of a phone.
-// Used primarily in CTC-type training.
-static float PHONE_BOUNDARY = 2.0f;
-
 // Class represents an MLF deserializer.
 // Provides a set of chunks/sequences to the upper layers.
-class MLFDataDeserializer : public DataDeserializerBase
+class MLFDataDeserializer : public DataDeserializerBase, boost::noncopyable
 {
 public:
     // Expects new configuration.
@@ -48,7 +44,6 @@ private:
     class ChunkBase;
     class SequenceChunk;
     class FrameChunk;
-    DISABLE_COPY_AND_MOVE(MLFDataDeserializer);
 
     void InitializeChunkDescriptions(CorpusDescriptorPtr corpus, const ConfigHelper& config, const std::wstring& stateListPath, size_t dimension);
     void InitializeStream(const std::wstring& name, size_t dimension);
@@ -57,23 +52,8 @@ private:
     // This assumes that IDs introduced by the corpus are dense (which they right now, depending on the number of invalid / filtered sequences).
     std::vector<std::pair<const ChunkDescriptor*, const SequenceDescriptor*>> m_keyToSequence;
 
-    // Number of sequences
-    size_t m_numberOfSequences = 0;
-
-    // Array of all labels.
-    msra::dbn::biggrowablevector<msra::dbn::CLASSIDTYPE> m_classIds;
-
-    // Phone boundaries in each sequence
-    vector<vector<size_t>> m_phoneBoundaries;
-
-    // Index of utterances in the m_classIds (index of the first frame of the utterance)
-    msra::dbn::biggrowablevector<size_t> m_utteranceIndex;
-
     // Type of the data this serializer provides.
     ElementType m_elementType;
-
-    // Total number of frames.
-    size_t m_totalNumberOfFrames;
 
     // Array of available categories.
     // We do no allocate data for all input sequences, only returning a pointer to existing category.
@@ -101,6 +81,5 @@ private:
     std::vector<std::pair<std::wstring, MLFIndexerPtr>> m_indexers;
     std::vector<std::pair<std::shared_ptr<FILE>, std::wstring>> m_mlfFiles;
 };
-
 
 }}}
