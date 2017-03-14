@@ -48,9 +48,9 @@ namespace Microsoft { namespace MSR { namespace CNTK {
     {
         static const double htkTimeToFrame;
 
-        ClassIdType m_classId;     // numeric state id
         uint32_t m_firstFrame;     // start frame
         uint32_t m_numFrames;      // number of frames
+        ClassIdType m_classId;     // numeric state id
 
     public:
         // Parses format with original HTK state align MLF format and state list and builds an MLFFrameRange.

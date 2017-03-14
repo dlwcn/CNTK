@@ -116,7 +116,7 @@ public:
 // Sequence MLF chunk. The time of life always less than the time of life of the parent deserializer.
 class MLFDataDeserializer::SequenceChunk : public MLFDataDeserializer::ChunkBase
 {
-    std::vector<SparseSequenceDataPtr> m_sequences;
+    std::vector<std::vector<MLFFrameRange>> m_sequences;
 
 public:
     SequenceChunk(const MLFDataDeserializer& parent, const ChunkDescriptor& descriptor, const std::wstring& fileName, std::shared_ptr<FILE>& f, StateTablePtr states)
@@ -145,37 +145,7 @@ public:
             m_valid[sequence.m_indexInChunk] = false;
             return;
         }
-
-        // Compute some statistics and perform checks.
-        vector<size_t> sequencePhoneBoundaries(m_parent.m_withPhoneBoundaries ? utterance.size() : 0);
-        for (size_t i = 0; i < utterance.size(); ++i)
-        {
-            if (m_parent.m_withPhoneBoundaries)
-                sequencePhoneBoundaries[i] = utterance[i].FirstFrame();
-
-            const auto& range = utterance[i];
-            if (range.ClassId() >= m_parent.m_dimension)
-                RuntimeError("Class id %d exceeds the model output dimension %d.", (int)range.ClassId(), (int)m_parent.m_dimension);
-        }
-
-        // Packing labels for the utterance into sparse sequence.
-        SparseSequenceDataPtr s;
-        if (m_parent.m_elementType == ElementType::tfloat)
-            s = make_shared<MLFSequenceData<float>>(sequence.m_numberOfSamples, m_parent.m_withPhoneBoundaries ? sequencePhoneBoundaries : vector<size_t>{});
-        else
-        {
-            assert(m_parent.m_elementType == ElementType::tdouble);
-            s = make_shared<MLFSequenceData<double>>(sequence.m_numberOfSamples, m_parent.m_withPhoneBoundaries ? sequencePhoneBoundaries : vector<size_t>{});
-        }
-
-        auto startRange = s->m_indices;
-        for (const auto& f : utterance)
-        {
-            std::fill(startRange, startRange + f.NumFrames(), static_cast<IndexType>(f.ClassId()));
-            startRange += f.NumFrames();
-        }
-
-        m_sequences[sequence.m_indexInChunk] = s;
+        m_sequences[sequence.m_indexInChunk] = std::move(utterance);
     }
 
     void GetSequence(size_t sequenceIndex, std::vector<SequenceDataPtr>& result) override
@@ -188,7 +158,38 @@ public:
             return;
         }
 
-        result.push_back(m_sequences[sequenceIndex]);
+        const auto& utterance = m_sequences[sequenceIndex];
+        const auto& sequence = m_descriptor.m_sequences[sequenceIndex];
+
+        // Compute some statistics and perform checks.
+        vector<size_t> sequencePhoneBoundaries(m_parent.m_withPhoneBoundaries ? utterance.size() : 0);
+        if (m_parent.m_withPhoneBoundaries)
+        {
+            for (size_t i = 0; i < utterance.size(); ++i)
+                sequencePhoneBoundaries[i] = utterance[i].FirstFrame();
+        }
+
+        // Packing labels for the utterance into sparse sequence.
+        SparseSequenceDataPtr s;
+        if (m_parent.m_elementType == ElementType::tfloat)
+            s = make_shared<MLFSequenceData<float>>(sequence.m_numberOfSamples, sequencePhoneBoundaries);
+        else
+        {
+            assert(m_parent.m_elementType == ElementType::tdouble);
+            s = make_shared<MLFSequenceData<double>>(sequence.m_numberOfSamples, sequencePhoneBoundaries);
+        }
+
+        auto startRange = s->m_indices;
+        for (const auto& f : utterance)
+        {
+            std::fill(startRange, startRange + f.NumFrames(), static_cast<IndexType>(f.ClassId()));
+            startRange += f.NumFrames();
+
+            if (f.ClassId() >= m_parent.m_dimension)
+                RuntimeError("Class id %d exceeds the model output dimension %d.", (int)f.ClassId(), (int)m_parent.m_dimension);
+        }
+
+        result.push_back(s);
     }
 };
 
