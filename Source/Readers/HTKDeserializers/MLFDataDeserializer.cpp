@@ -128,7 +128,8 @@ public:
         for (int i = 0; i < descriptor.m_sequences.size(); ++i)
             CacheSequence(descriptor.m_sequences[i]);
 
-        m_buffer.swap(std::vector<char>());
+        std::vector<char> tmp;
+        m_buffer.swap(tmp);
     }
 
     void CacheSequence(const SequenceDescriptor& sequence)
@@ -210,7 +211,8 @@ public:
         for (int i = 0; i < descriptor.m_sequences.size(); ++i)
             CacheSequence(descriptor.m_sequences[i]);
 
-        m_buffer.swap(std::vector<char>());
+        std::vector<char> tmp;
+        m_buffer.swap(tmp);
     }
 
     // Get utterance by the absolute frame index in chunk.
