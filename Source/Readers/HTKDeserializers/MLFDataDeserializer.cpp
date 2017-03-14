@@ -143,8 +143,6 @@ public:
             return;
         }
 
-        m_valid[sequence.m_indexInChunk] = true;
-
         // Compute some statistics and perform checks.
         vector<size_t> sequencePhoneBoundaries(m_parent.m_withPhoneBoundaries ? utterance.size() : 0);
         for (size_t i = 0; i < utterance.size(); ++i)
@@ -253,8 +251,6 @@ public:
             fprintf(stderr, "WARNING: Cannot parse the utterance %s", m_parent.m_corpus->IdToKey(sequence.m_key.m_sequence).c_str());
             return;
         }
-
-        m_valid[sequence.m_indexInChunk] = true;
 
         auto startRange = m_classIds.begin() + m_descriptor.m_firstSamples[sequence.m_indexInChunk];
         for(size_t i = 0; i < utterance.size(); ++i)
